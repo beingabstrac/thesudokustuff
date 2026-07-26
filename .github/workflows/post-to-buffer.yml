@@ -1,16 +1,37 @@
 name: Post Sudoku Reel to Buffer Queue
 
 on:
-  schedule:
-    - cron: '0 */6 * * *'
   workflow_dispatch:
+    inputs:
+      fill_count:
+        description: "How many reels to create and add to Buffer"
+        required: false
+        default: "10"
+  schedule:
+    # Keeps Buffer topped up every 2 hours. Buffer decides actual publish times.
+    - cron: "0 */2 * * *"
+
+concurrency:
+  group: post-to-buffer
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
-  top_up_queue:
+  render-and-queue:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+      BUFFER_INSTAGRAM_CHANNEL_ID: ${{ secrets.BUFFER_INSTAGRAM_CHANNEL_ID }}
+      CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
+      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+      QUEUE_FILL_COUNT: ${{ github.event.inputs.fill_count || '10' }}
+      IGNORE_QUEUE_FULL: "1"
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -25,24 +46,28 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Install Dependencies
-        run: python -m pip install -r requirements.txt
-
-      - name: Render Sudoku Reel
-        run: ./scripts/render.sh
-
-      - name: Post to Buffer Queue
-        env:
-          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
-          BUFFER_INSTAGRAM_CHANNEL_ID: ${{ secrets.BUFFER_INSTAGRAM_CHANNEL_ID }}
-          CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
-          MAX_BUFFER_QUEUE: 5
-        run: python scripts/post_to_buffer.py
-
-      - name: Advance Progress Pointer (if posted)
         run: |
-          if [ ! -f outputs/queue_full ]; then
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Render and Queue Loop
+        run: |
+          count="${QUEUE_FILL_COUNT:-10}"
+          case "$count" in
+            ''|*[!0-9]*) count=10 ;;
+          esac
+          if [ "$count" -lt 1 ]; then count=1; fi
+          if [ "$count" -gt 10 ]; then count=10; fi
+          for i in $(seq 1 "$count"); do
+            echo "--- Rendering and Queueing Sudoku Reel $i of $count ---"
+            ./scripts/render.sh
+            python scripts/post_to_buffer.py
+            if [ -f outputs/queue_full ]; then
+              echo "Buffer queue is full (10 slots filled); stopping top-up loop."
+              break
+            fi
             python scripts/advance_progress.py
-          fi
+          done
 
       - name: Commit and Push Progress State
         run: |

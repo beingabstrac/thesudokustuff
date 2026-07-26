@@ -104,6 +104,12 @@ def gql_string(value):
     return json.dumps(value)
 
 
+def is_queue_full_error(message):
+    text = (message or "").lower()
+    markers = ["queue", "limit", "maximum", "max", "scheduled posts", "10 posts"]
+    return any(marker in text for marker in markers)
+
+
 def create_buffer_post(caption, video_url):
     api_key = require_env("BUFFER_API_KEY")
     channel_id = require_env("BUFFER_INSTAGRAM_CHANNEL_ID")
@@ -152,22 +158,31 @@ def create_buffer_post(caption, video_url):
     if data.get("errors"):
         raise RuntimeError(json.dumps(data["errors"], indent=2))
     result = data.get("data", {}).get("createPost", {})
-    if "message" in result:
-        raise RuntimeError(f"Buffer MutationError: {result['message']}")
-    return result
+    if result.get("message"):
+        msg = result["message"]
+        if os.getenv("IGNORE_QUEUE_FULL") == "1" and is_queue_full_error(msg):
+            print(f"Notice: Buffer queue is full ({msg})")
+            return None
+        raise RuntimeError(f"Buffer MutationError: {msg}")
+    return result.get("post", {})
 
 
 def main():
-    if QUEUE_FULL_MARKER.exists():
-        QUEUE_FULL_MARKER.unlink()
+    QUEUE_FULL_MARKER.unlink(missing_ok=True)
 
     story = load_story()
     caption = caption_for_story(story)
-    print(f"Posting reel to Buffer for Sudoku #{story['sudoku_id']}...")
+    print(f"Posting reel to Buffer for Sudoku #{story['sudoku_id']} ({story['displayDate']} {story['difficulty']})...")
     video_url, public_id = public_video_asset(story)
     print(f"Uploaded video to Cloudinary: {video_url}")
 
     result = create_buffer_post(caption, video_url)
+    if not result:
+        QUEUE_FULL_MARKER.parent.mkdir(parents=True, exist_ok=True)
+        QUEUE_FULL_MARKER.write_text("1\n", encoding="utf-8")
+        print("Buffer queue limit reached; queue_full marker created.")
+        return
+
     print("SUCCESS: Post added to Buffer Queue!")
     print(json.dumps(result, indent=2))
 
