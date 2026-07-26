@@ -28,8 +28,6 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Render Sudoku Reel
-        env:
-          DIFFICULTY: easy
         run: ./scripts/render.sh
 
       - name: Post to Buffer Queue

@@ -430,7 +430,8 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     
     target_d = puzzle_date()
-    difficulty = os.getenv("DIFFICULTY", "easy")
+    prog = load_progress()
+    difficulty = os.getenv("DIFFICULTY", prog.get("difficulty", "easy"))
     puzzle_info = fetch_nyt_sudoku(target_d, difficulty)
     offset = (target_d - START_DATE).days
     
