@@ -132,7 +132,9 @@ def pretty_date(d):
 def fetch_nyt_sudoku(target_date, difficulty="easy"):
     """Fetch daily NYT Sudoku puzzle data from NYT or local fallback."""
     diff_key = difficulty.lower()
-    puzzle_id = (target_date - START_DATE).days + 1
+    diff_idx = {"easy": 0, "medium": 1, "hard": 2}.get(diff_key, 0)
+    offset = (target_date - START_DATE).days
+    puzzle_id = offset * 3 + diff_idx + 1
     date_str = pretty_date(target_date)
 
     url = f"https://www.nytimes.com/puzzles/sudoku/{diff_key}"
