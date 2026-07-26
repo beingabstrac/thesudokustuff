@@ -39,7 +39,7 @@ W, H = 1080, 1920
 FPS = 30
 START_DATE = date(2019, 11, 21)
 
-# Colors (Exact NYT Sudoku Light Theme with Soft Gray Meta)
+# Colors (Exact NYT Sudoku Light Theme with Soft Gray Meta & Realistic Markers)
 COLOR_BG = (255, 255, 255)                  # Pure white #FFFFFF
 COLOR_GRID_INNER = (185, 192, 200)          # Inner line #B9C0C8
 COLOR_GRID_OUTER = (0, 0, 0)                # Heavy black outer border #000000
@@ -49,6 +49,9 @@ COLOR_CELL_GIVEN = (227, 229, 232)          # Light gray given cell #E3E5E8
 COLOR_CELL_CROSSHAIR_EMPTY = (252, 243, 212) # Warm cream empty crosshair #FCF3D4
 COLOR_CELL_CROSSHAIR_GIVEN = (205, 196, 178) # Medium tan given crosshair #CDC4B2
 COLOR_CELL_MATCH = (235, 140, 0)            # NYT Vivid Orange matching digit #EB8C00
+COLOR_CELL_ERROR = (239, 68, 68)            # Vibrant Red Error Flash #EF4444
+COLOR_TEXT_ERROR = (255, 255, 255)         # White text on error cell
+COLOR_PENCIL = (100, 116, 139)               # Slate pencil mark gray #64748B
 COLOR_MUTED = (100, 116, 139)               # Soft muted gray #64748B
 
 # Exact Wordle Voice Pool & Dynamic Prosody
@@ -63,6 +66,7 @@ EDGE_BEAT_PROSODY = {
     "opener": ("+0%", "+0Hz"),
     "calm": ("+0%", "+0Hz"),
     "focused": ("+3%", "+1Hz"),
+    "uncertain": ("-4%", "-1Hz"),
     "triumphant": ("+2%", "+2Hz"),
 }
 
@@ -202,18 +206,37 @@ def fetch_nyt_sudoku(target_date, difficulty="easy"):
         ]
     }
 
+def get_candidates(board, idx):
+    """Return list of valid candidates for empty cell idx."""
+    if board[idx] != 0:
+        return []
+    r, c = idx // 9, idx % 9
+    used = set()
+    for i in range(9):
+        used.add(board[r * 9 + i])
+        used.add(board[i * 9 + c])
+    box_r, box_c = (r // 3) * 3, (c // 3) * 3
+    for br in range(3):
+        for bc in range(3):
+            used.add(board[(box_r + br) * 9 + (box_c + bc)])
+    return [d for d in range(1, 10) if d not in used]
+
 def solve_steps(puzzle, solution):
-    """Generate FULL end-to-end solving sequence with Wordle-styled clean contextual speech."""
+    """Generate smooth natural left-to-right top-to-bottom solving sequence for clean eye comfort."""
     empty_indices = [i for i, val in enumerate(puzzle) if val == 0]
-    steps = []
+    empty_indices.sort()  # Pure left-to-right, top-to-bottom reading order (0..80)
     
+    steps = []
     for i_count, idx in enumerate(empty_indices):
         r, c = idx // 9, idx % 9
         val = solution[idx]
         box = (r // 3) * 3 + (c // 3) + 1
         
+        # Wordle-styled contextual human speech
         if i_count == 0:
             speech = f"Starting in box {box}, {val}."
+        elif i_count == 14:
+            speech = f"Let me try a 5 in box {box}."
         elif i_count == len(empty_indices) - 1:
             speech = f"And the final digit is {val}."
         elif i_count % 6 == 0:
@@ -233,18 +256,20 @@ def solve_steps(puzzle, solution):
             "row": r,
             "col": c,
             "digit": val,
-            "speech": speech
+            "speech": speech,
+            "is_mistake_step": (i_count == 14)
         })
         
     return steps
 
-def draw_frame(board, givens, active_cell=None, just_placed=None, puzzle_info=None):
-    """Render a 1080x1920 frame with dead-center Sudoku grid & soft gray meta/footer."""
+def draw_frame(board, givens, active_cell=None, just_placed=None, error_cell=None, pencil_marks=None, puzzle_info=None):
+    """Render a 1080x1920 frame with dead-center Sudoku grid, Snyder notes & error states."""
     img = Image.new("RGB", (W, H), COLOR_BG)
     draw = ImageDraw.Draw(img)
     
     f_header = font(38, bold=True)
     f_digit = font(58, bold=True)
+    f_pencil = font(22, bold=False)
     f_footer = font(38, bold=True)
     
     # 1. Header Spec: Sudoku #1 Easy   •   November 21, 2019 (Soft Muted Gray #64748B)
@@ -285,21 +310,32 @@ def draw_frame(board, givens, active_cell=None, just_placed=None, puzzle_info=No
             elif active_cell == idx or just_placed == idx:
                 bg_color = COLOR_CELL_MATCH
                 
+            if error_cell == idx:
+                bg_color = COLOR_CELL_ERROR
+                
             draw.rectangle([x1, y1, x2, y2], fill=bg_color)
             draw.rectangle([x1, y1, x2, y2], outline=COLOR_GRID_INNER, width=1)
             
             if val != 0:
-                draw.text((x1 + cell_s // 2, y1 + cell_s // 2), str(val), font=f_digit, fill=COLOR_TEXT_ALL, anchor="mm")
+                text_fill = COLOR_TEXT_ERROR if error_cell == idx else COLOR_TEXT_ALL
+                draw.text((x1 + cell_s // 2, y1 + cell_s // 2), str(val), font=f_digit, fill=text_fill, anchor="mm")
+            elif pencil_marks and idx in pencil_marks:
+                # Draw Snyder Candidate Pencil Notes (3x3 grid inside cell)
+                candidates = sorted(list(pencil_marks[idx]))
+                for p_val in candidates:
+                    pr = (p_val - 1) // 3
+                    pc = (p_val - 1) % 3
+                    px = x1 + 20 + pc * 33
+                    py = y1 + 20 + pr * 33
+                    draw.text((px, py), str(p_val), font=f_pencil, fill=COLOR_PENCIL, anchor="mm")
                 
     # Heavy 3x3 Outer & Inner Grid Lines
     for i in range(1, 9):
         pos = i * cell_s
         if i % 3 == 0:
-            # 4px heavy box divider
             draw.rectangle([gx + pos - 2, gy, gx + pos + 2, gy + grid_size], fill=COLOR_GRID_OUTER)
             draw.rectangle([gx, gy + pos - 2, gx + grid_size, gy + pos + 2], fill=COLOR_GRID_OUTER)
         else:
-            # 1px inner cell line
             draw.rectangle([gx + pos, gy, gx + pos + 1, gy + grid_size], fill=COLOR_GRID_INNER)
             draw.rectangle([gx, gy + pos, gx + grid_size, gy + pos + 1], fill=COLOR_GRID_INNER)
             
@@ -380,6 +416,14 @@ def write_sfx(path, sfx_type):
         for i in range(n_samples):
             v = int(14000 * math.sin(2 * math.pi * 880 * (i / sample_rate)) * math.exp(-i / (n_samples * 0.2)))
             buf.extend(struct.pack('<h', v))
+    elif sfx_type == "error":
+        duration = 0.18
+        n_samples = int(sample_rate * duration)
+        buf = bytearray()
+        for i in range(n_samples):
+            v = int(16000 * (math.sin(2 * math.pi * 180 * (i / sample_rate)) + math.sin(2 * math.pi * 240 * (i / sample_rate))))
+            v = int(v * math.exp(-i / (n_samples * 0.5)))
+            buf.extend(struct.pack('<h', v))
     elif sfx_type == "chime":
         duration = 0.4
         n_samples = int(sample_rate * duration)
@@ -428,7 +472,7 @@ def write_audio_timeline(events, out_path, total_seconds):
         out.writeframes(clipped.tobytes())
 
 def main():
-    print("--- Generating Frame-Synchronized Sudoku Reel ---")
+    print("--- Generating Smooth In-Sequence Sudoku Reel ---")
     OUT.mkdir(parents=True, exist_ok=True)
     
     target_d = puzzle_date()
@@ -444,22 +488,29 @@ def main():
     puzzle = list(puzzle_info["puzzle"])
     solution = list(puzzle_info["solution"])
     givens = [v != 0 for v in puzzle]
-    current_board = list(puzzle)
     
     steps = solve_steps(puzzle, solution)
     total_moves = len(steps)
-    print(f"Total moves to solve: {total_moves}")
+    
+    # Initialize Snyder Pencil Marks for initial 2-candidate cells
+    pencil_marks = {}
+    for idx in range(81):
+        if puzzle[idx] == 0:
+            cands = get_candidates(puzzle, idx)
+            if len(cands) == 2:
+                pencil_marks[idx] = set(cands)
     
     with tempfile.TemporaryDirectory() as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str)
         audio_events = []
         
         click_sfx = tmp_dir / "click.wav"
+        error_sfx = tmp_dir / "error.wav"
         chime_sfx = tmp_dir / "chime.wav"
         write_sfx(click_sfx, "click")
+        write_sfx(error_sfx, "error")
         write_sfx(chime_sfx, "chime")
         
-        # Build frame sequence and audio schedule concurrently on exact 1/30s frame index grid!
         frame_actions = []
         current_frame = 0
         
@@ -472,61 +523,98 @@ def main():
         
         audio_events.append((0.0, intro_wav))
         for _ in range(intro_frames):
-            frame_actions.append({"type": "intro", "cell": None, "just_placed": None})
+            frame_actions.append({"type": "intro", "cell": None, "just_placed": None, "error": None})
         current_frame += intro_frames
         
         storyboard_segments = [{"type": "intro", "text": intro_text, "duration": intro_frames / FPS}]
         
-        # 2. Moves: Sample-Accurate Audio & Video Synchronization
+        # 2. Human Play Moves with Pencil Marks, Eye Scanning & 1 Realistic Correction
         for step_i, st in enumerate(steps):
             cell_idx = st["index"]
             digit = st["digit"]
             speech = st["speech"]
+            is_mistake = st.get("is_mistake_step", False)
             
             st_start_frame = current_frame
             
-            if speech:
-                step_wav = tmp_dir / f"step_{step_i}.wav"
-                make_voice_clip(speech, step_wav, voice_index, beat="focused")
-                v_dur = wav_duration(step_wav)
+            if is_mistake:
+                # ----------------------------------------------------
+                # REALISTIC MISTAKE & CORRECTION MOMENT
+                # ----------------------------------------------------
+                wrong_digit = 5 if digit != 5 else 7
+                wrong_speech = f"Let's try a {wrong_digit} in row {st['row'] + 1}."
                 
-                # Voice starts at EXACT frame time
-                audio_events.append((st_start_frame / FPS, step_wav))
-                sel_frames = int(round(max(0.5, v_dur) * FPS))
+                wav_wrong = tmp_dir / f"step_{step_i}_wrong.wav"
+                make_voice_clip(wrong_speech, wav_wrong, voice_index, beat="uncertain")
+                w_dur = wav_duration(wav_wrong)
+                
+                audio_events.append((current_frame / FPS, wav_wrong))
+                sel_frames = int(round(max(0.5, w_dur) * FPS))
+                for _ in range(sel_frames):
+                    frame_actions.append({"type": "select", "cell": cell_idx, "just_placed": None, "error": None})
+                current_frame += sel_frames
+                
+                # Place WRONG digit -> Red Error Flash & Buzz SFX!
+                audio_events.append((current_frame / FPS, error_sfx))
+                
+                # Correction speech: "Wait, that conflicts with column X. Let me fix that."
+                fix_text = f"Wait, that conflicts with column {st['col'] + 1}. Let me fix that."
+                wav_fix = tmp_dir / f"step_{step_i}_fix.wav"
+                make_voice_clip(fix_text, wav_fix, voice_index, beat="calm")
+                f_dur = wav_duration(wav_fix)
+                
+                audio_events.append((current_frame / FPS, wav_fix))
+                fix_frames = int(round(max(0.6, f_dur + 0.2) * FPS))
+                # KEEP RED BOX & WRONG DIGIT VISIBLE UNTIL VOICEOVER FINISHES!
+                for _ in range(fix_frames):
+                    frame_actions.append({"type": "error", "cell": cell_idx, "just_placed": None, "error": cell_idx, "override_digit": wrong_digit})
+                current_frame += fix_frames
+                
+                # Place CORRECT digit -> Click SFX & Orange Flash!
+                audio_events.append((current_frame / FPS, click_sfx))
+                for _ in range(8):
+                    frame_actions.append({"type": "flash", "cell": cell_idx, "just_placed": cell_idx, "error": None, "digit": digit})
+                current_frame += 8
+                
+                for _ in range(6):
+                    frame_actions.append({"type": "hold", "cell": cell_idx, "just_placed": None, "error": None, "digit": digit})
+                current_frame += 6
+                
             else:
-                sel_frames = 4  # 0.133s selection
+                # Normal move
+                if speech:
+                    step_wav = tmp_dir / f"step_{step_i}.wav"
+                    make_voice_clip(speech, step_wav, voice_index, beat="focused")
+                    v_dur = wav_duration(step_wav)
+                    audio_events.append((current_frame / FPS, step_wav))
+                    sel_frames = int(round(max(0.5, v_dur) * FPS))
+                else:
+                    sel_frames = 4
+                    
+                for _ in range(sel_frames):
+                    frame_actions.append({"type": "select", "cell": cell_idx, "just_placed": None, "error": None})
+                current_frame += sel_frames
                 
-            # Phase 1: Selection Phase (Cell highlighted orange, digit NOT placed yet)
-            for _ in range(sel_frames):
-                frame_actions.append({"type": "select", "cell": cell_idx, "just_placed": None, "digit": None})
-            current_frame += sel_frames
-            
-            # EXACT PLACEMENT FRAME! The click sound plays on EXACT frame time!
-            placement_frame = current_frame
-            audio_events.append((placement_frame / FPS, click_sfx)) # 100% PERFECT FRAME SYNC!
-            
-            # Phase 2: Placement Flash (8 frames / 0.266s)
-            flash_frames = 8
-            for _ in range(flash_frames):
-                frame_actions.append({"type": "flash", "cell": cell_idx, "just_placed": cell_idx, "digit": digit})
-            current_frame += flash_frames
-            
-            # Phase 3: Hold Pause (6 frames / 0.200s)
-            hold_frames = 6
-            for _ in range(hold_frames):
-                frame_actions.append({"type": "hold", "cell": cell_idx, "just_placed": None, "digit": digit})
-            current_frame += hold_frames
-            
-            move_total_dur = (sel_frames + flash_frames + hold_frames) / FPS
+                # EXACT PLACEMENT MOMENT
+                audio_events.append((current_frame / FPS, click_sfx))
+                
+                for _ in range(8):
+                    frame_actions.append({"type": "flash", "cell": cell_idx, "just_placed": cell_idx, "error": None, "digit": digit})
+                current_frame += 8
+                
+                for _ in range(6):
+                    frame_actions.append({"type": "hold", "cell": cell_idx, "just_placed": None, "error": None, "digit": digit})
+                current_frame += 6
+                
             storyboard_segments.append({
                 "type": "move",
                 "cell": cell_idx,
                 "digit": digit,
                 "text": speech,
-                "duration": move_total_dur
+                "duration": (current_frame - st_start_frame) / FPS
             })
             
-        # 3. Outro Voice (Warm, nice closing)
+        # 3. Outro
         diff_str = puzzle_info.get("difficulty", "Easy").capitalize()
         outro_text = f"And that's today's {diff_str} Sudoku complete! See you tomorrow."
         outro_wav = tmp_dir / "outro.wav"
@@ -538,7 +626,7 @@ def main():
         audio_events.append((outro_start_time, outro_wav))
         audio_events.append((outro_start_time, chime_sfx))
         for _ in range(outro_frames):
-            frame_actions.append({"type": "outro", "cell": None, "just_placed": None})
+            frame_actions.append({"type": "outro", "cell": None, "just_placed": None, "error": None})
         current_frame += outro_frames
         
         storyboard_segments.append({"type": "outro", "text": outro_text, "duration": outro_frames / FPS})
@@ -573,17 +661,38 @@ def main():
                 print(f"FFmpeg Stdin Error: {e}\nFFmpeg Stderr:\n{err_out}")
                 raise e
 
-        # 6. Execute Frame Rendering Loop Matched to Frame Actions
+        # 6. Execute Frame Rendering Loop with Dynamic Pencil Notes Removal
         render_board = list(puzzle)
+        current_pencil = dict(pencil_marks)
+        
         for act in frame_actions:
             cell_idx = act.get("cell")
             just_placed = act.get("just_placed")
+            error_cell = act.get("error")
             digit = act.get("digit")
+            override_digit = act.get("override_digit")
             
-            if digit is not None and cell_idx is not None:
-                render_board[cell_idx] = digit
+            if override_digit is not None and cell_idx is not None:
+                temp_board = list(render_board)
+                temp_board[cell_idx] = override_digit
+                img = draw_frame(temp_board, givens, active_cell=cell_idx, just_placed=None, error_cell=error_cell, pencil_marks=current_pencil, puzzle_info=puzzle_info)
+            else:
+                if digit is not None and cell_idx is not None:
+                    render_board[cell_idx] = digit
+                    current_pencil.pop(cell_idx, None)
+                    # Clear this placed digit from all pencil marks in same row/col/box!
+                    r_p, c_p = cell_idx // 9, cell_idx % 9
+                    box_p = (r_p // 3) * 3 + (c_p // 3)
+                    for p_k in list(current_pencil.keys()):
+                        r_k, c_k = p_k // 9, p_k % 9
+                        box_k = (r_k // 3) * 3 + (c_k // 3)
+                        if r_k == r_p or c_k == c_p or box_k == box_p:
+                            current_pencil[p_k].discard(digit)
+                            if not current_pencil[p_k]:
+                                current_pencil.pop(p_k, None)
+                    
+                img = draw_frame(render_board, givens, active_cell=cell_idx, just_placed=just_placed, error_cell=error_cell, pencil_marks=current_pencil, puzzle_info=puzzle_info)
                 
-            img = draw_frame(render_board, givens, active_cell=cell_idx, just_placed=just_placed, puzzle_info=puzzle_info)
             push_frame(img)
             
         storyboard_data = {
@@ -601,7 +710,7 @@ def main():
         ffmpeg_proc.stdin.close()
         ffmpeg_proc.wait()
 
-        print(f"SUCCESS: Generated Frame-Synchronized Sudoku Reel -> {VIDEO_OUT} ({total_duration:.1f}s)")
+        print(f"SUCCESS: Generated Smooth In-Sequence Sudoku Reel -> {VIDEO_OUT} ({total_duration:.1f}s)")
 
 if __name__ == "__main__":
     main()
