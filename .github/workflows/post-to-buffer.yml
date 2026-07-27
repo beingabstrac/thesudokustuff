@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       fill_count:
-        description: "How many reels to create and add to Buffer"
+        description: "How many reels to create and add to Buffer (0 to only clear queue)"
         required: false
         default: "10"
       clear_queue:
@@ -61,6 +61,10 @@ jobs:
       - name: Render and Queue Loop
         run: |
           count="${QUEUE_FILL_COUNT:-10}"
+          if [ "$count" -eq 0 ]; then
+            echo "QUEUE_FILL_COUNT is 0; skipping render and queue phase as requested."
+            exit 0
+          fi
           case "$count" in
             ''|*[!0-9]*) count=10 ;;
           esac
