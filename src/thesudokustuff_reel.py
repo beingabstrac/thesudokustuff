@@ -189,7 +189,7 @@ def generate_unique_sudoku(target_date, difficulty="easy"):
     return puzzle, flat_sol
 
 def fetch_nyt_sudoku(target_date, difficulty="easy"):
-    """Fetch official NYT daily Sudoku puzzle data from data/nyt_puzzles.json archive dataset."""
+    """Fetch official NYT daily Sudoku puzzle data by exact date key from data/nyt_puzzles.json dataset."""
     diff_key = difficulty.lower()
     diff_idx = {"easy": 0, "medium": 1, "hard": 2}.get(diff_key, 0)
     offset = (target_date - START_DATE).days
@@ -200,15 +200,15 @@ def fetch_nyt_sudoku(target_date, difficulty="easy"):
     if nyt_archive_path.exists():
         try:
             data = json.loads(nyt_archive_path.read_text(encoding="utf-8"))
-            matching = [v for k, v in sorted(data.items()) if k.endswith(f"_{diff_key}")]
-            if matching:
-                official_item = matching[offset % len(matching)]
+            exact_key = f"{target_date.isoformat()}_{diff_key}"
+            if exact_key in data:
+                item = data[exact_key]
                 return {
                     "puzzle_id": puzzle_id,
                     "difficulty": difficulty.capitalize(),
                     "displayDate": date_str,
-                    "puzzle": official_item["puzzle"],
-                    "solution": official_item["solution"]
+                    "puzzle": item["puzzle"],
+                    "solution": item["solution"]
                 }
         except Exception:
             pass
