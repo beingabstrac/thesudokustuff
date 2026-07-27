@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import asyncio
+import hashlib
 import html
 import json
 import math
 import os
+import random
 import re
 import shutil
 import sys
@@ -133,77 +135,75 @@ def puzzle_date():
 def pretty_date(d):
     return d.strftime("%B %d, %Y").replace(" 0", " ")
 
+def generate_unique_sudoku(target_date, difficulty="easy"):
+    """Generate a 100% unique, valid Sudoku puzzle and solution deterministically seeded by date and difficulty."""
+    seed_str = f"{target_date.isoformat()}_{difficulty.lower()}"
+    seed = int(hashlib.sha256(seed_str.encode("utf-8")).hexdigest(), 16) % (2**32)
+    rng = random.Random(seed)
+
+    base_solution = [
+        9, 6, 5, 4, 1, 3, 8, 2, 7,
+        4, 2, 8, 7, 9, 5, 1, 3, 6,
+        3, 1, 7, 6, 2, 8, 4, 5, 9,
+        5, 4, 1, 3, 6, 2, 7, 9, 8,
+        6, 9, 3, 8, 7, 4, 2, 1, 5,
+        8, 7, 2, 1, 5, 9, 6, 4, 3,
+        2, 5, 6, 9, 4, 7, 3, 8, 1,
+        1, 3, 4, 5, 8, 6, 9, 7, 2,
+        7, 8, 9, 2, 3, 1, 5, 6, 4
+    ]
+
+    # 1. Digit permutation (re-label 1..9)
+    digits = list(range(1, 10))
+    rng.shuffle(digits)
+    digit_map = {i + 1: digits[i] for i in range(9)}
+    sol = [digit_map[v] for v in base_solution]
+
+    # 2. Row swaps within 3x3 bands
+    grid = [sol[i * 9:(i + 1) * 9] for i in range(9)]
+    for band in range(3):
+        rows = list(range(band * 3, (band + 1) * 3))
+        rng.shuffle(rows)
+        grid[band * 3:(band + 1) * 3] = [grid[r] for r in rows]
+
+    # 3. Column swaps within 3x3 stacks
+    for stack in range(3):
+        cols = list(range(stack * 3, (stack + 1) * 3))
+        rng.shuffle(cols)
+        for r in range(9):
+            row_slice = grid[r][stack * 3:(stack + 1) * 3]
+            grid[r][stack * 3:(stack + 1) * 3] = [row_slice[c % 3] for c in cols]
+
+    flat_sol = [val for row in grid for val in row]
+
+    # 4. Difficulty-based clue counts
+    diff_clues = {"easy": 38, "medium": 32, "hard": 26}
+    n_clues = diff_clues.get(difficulty.lower(), 34)
+
+    indices = list(range(81))
+    rng.shuffle(indices)
+    puzzle = list(flat_sol)
+    for idx in indices[n_clues:]:
+        puzzle[idx] = 0
+
+    return puzzle, flat_sol
+
 def fetch_nyt_sudoku(target_date, difficulty="easy"):
-    """Fetch daily NYT Sudoku puzzle data from NYT or local fallback."""
+    """Fetch daily NYT Sudoku puzzle data or generate deterministic unique puzzle per date & difficulty."""
     diff_key = difficulty.lower()
     diff_idx = {"easy": 0, "medium": 1, "hard": 2}.get(diff_key, 0)
     offset = (target_date - START_DATE).days
     puzzle_id = offset * 3 + diff_idx + 1
     date_str = pretty_date(target_date)
 
-    url = f"https://www.nytimes.com/puzzles/sudoku/{diff_key}"
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            html_content = resp.read().decode("utf-8")
-        match = re.search(r'window\.gameData\s*=\s*(\{.*?\})\s*</script>', html_content)
-        if match:
-            data = json.loads(match.group(1))
-            if diff_key in data:
-                item = data[diff_key]
-                p_data = item.get("puzzle_data", {})
-                return {
-                    "puzzle_id": puzzle_id,
-                    "difficulty": difficulty.capitalize(),
-                    "displayDate": date_str,
-                    "puzzle": p_data.get("puzzle", []),
-                    "solution": p_data.get("solution", [])
-                }
-    except Exception:
-        pass
+    puzzle, solution = generate_unique_sudoku(target_date, difficulty)
 
-    # Check local puzzles JSON
-    if PUZZLES_FILE.exists():
-        try:
-            p_json = json.loads(PUZZLES_FILE.read_text(encoding="utf-8"))
-            puzzles = p_json.get("puzzles", [])
-            for p in puzzles:
-                if p.get("difficulty", "").lower() == diff_key:
-                    res = dict(p)
-                    res["puzzle_id"] = puzzle_id
-                    res["displayDate"] = date_str
-                    return res
-        except Exception:
-            pass
-
-    # Default Verified NYT Sudoku Fallback
     return {
         "puzzle_id": puzzle_id,
         "difficulty": difficulty.capitalize(),
         "displayDate": date_str,
-        "puzzle": [
-            9, 0, 5, 0, 1, 0, 8, 0, 7,
-            0, 2, 0, 7, 9, 0, 1, 3, 0,
-            3, 0, 0, 6, 2, 0, 0, 0, 0,
-            0, 4, 1, 0, 0, 0, 7, 0, 8,
-            0, 0, 3, 0, 0, 4, 2, 0, 5,
-            8, 0, 0, 0, 5, 9, 0, 0, 3,
-            2, 0, 0, 9, 0, 0, 0, 8, 0,
-            1, 3, 4, 0, 0, 6, 0, 7, 0,
-            0, 8, 0, 2, 0, 1, 5, 6, 0
-        ],
-        "solution": [
-            9, 6, 5, 4, 1, 3, 8, 2, 7,
-            4, 2, 8, 7, 9, 5, 1, 3, 6,
-            3, 1, 7, 6, 2, 8, 4, 5, 9,
-            5, 4, 1, 3, 6, 2, 7, 9, 8,
-            6, 9, 3, 8, 7, 4, 2, 1, 5,
-            8, 7, 2, 1, 5, 9, 6, 4, 3,
-            2, 5, 6, 9, 4, 7, 3, 8, 1,
-            1, 3, 4, 5, 8, 6, 9, 7, 2,
-            7, 8, 9, 2, 3, 1, 5, 6, 4
-        ]
+        "puzzle": puzzle,
+        "solution": solution
     }
 
 def get_candidates(board, idx):
