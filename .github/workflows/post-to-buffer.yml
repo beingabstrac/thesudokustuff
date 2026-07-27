@@ -4,13 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       fill_count:
-        description: "How many reels to create and add to Buffer (0 to only clear queue)"
+        description: "How many reels to create and add to Buffer"
         required: false
         default: "10"
-      clear_queue:
-        description: "Set to 'true' to clear existing Buffer queue first"
-        required: false
-        default: "false"
   schedule:
     # Keeps Buffer topped up every 2 hours. Buffer decides actual publish times.
     - cron: "0 */2 * * *"
@@ -54,17 +50,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Clear Old Buffer Queue (if requested)
-        if: ${{ github.event.inputs.clear_queue == 'true' }}
-        run: python scripts/clear_buffer_queue.py
-
       - name: Render and Queue Loop
         run: |
           count="${QUEUE_FILL_COUNT:-10}"
-          if [ "$count" -eq 0 ]; then
-            echo "QUEUE_FILL_COUNT is 0; skipping render and queue phase as requested."
-            exit 0
-          fi
           case "$count" in
             ''|*[!0-9]*) count=10 ;;
           esac
@@ -84,6 +72,6 @@ jobs:
       - name: Commit and Push Progress State
         run: |
           git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.email "github-actions[bot]"
           git add data/progress.json
           git diff --quiet && git diff --staged --quiet || (git commit -m "chore: advance sudoku progress" && git push)
