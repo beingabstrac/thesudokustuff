@@ -1,7 +1,7 @@
 {
-  "next_offset": 32,
-  "difficulty": "hard",
+  "next_offset": 33,
+  "difficulty": "easy",
   "last_puzzle_id": 3,
   "last_date": "2019-12-23",
-  "last_sudoku_id": 98
+  "last_sudoku_id": 99
 }
